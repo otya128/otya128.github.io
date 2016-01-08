@@ -58,8 +58,8 @@ var csrf_token;
                     y(this.responseText);
                     return
                 }
+                document.write("error:<a href='https://misskey.xyz/'>https://misskey.xyz/</a>でのログインが必要");
             }
-            document.write("error:<a src='https://misskey.xyz/'>https://misskey.xyz/</a>でのログインが必要");
         }
         req.open('POST', 'https://himasaku.misskey.xyz/users/followings');
         req.withCredentials = true
