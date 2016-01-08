@@ -39,7 +39,9 @@ var csrf_token;
             if (this.status == HTTP_STATUS_OK) {
                 csrf_token = /<meta name="csrf_token" content="([A-Za-z0-9\-_]+)">/.exec(this.responseText)[1];
                 a()
+                return
             }
+            document.write("error:<a href='https://misskey.xyz/'>https://misskey.xyz/</a>でのログインが必要");
         }
     }
     req.open('GET', 'https://misskey.xyz/');
