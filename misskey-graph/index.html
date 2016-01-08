@@ -35,9 +35,13 @@ var csrf_token;
     req.onreadystatechange = function() {
         var READYSTATE_COMPLETED = 4;
         var HTTP_STATUS_OK = 200;
-        if (this.readyState == READYSTATE_COMPLETED && this.status == HTTP_STATUS_OK) {
-            csrf_token = /<meta name="csrf_token" content="([A-Za-z0-9\-_]+)">/.exec(this.responseText)[1];
-            a()
+        if (this.readyState == READYSTATE_COMPLETED) {
+            if (this.status == HTTP_STATUS_OK) {
+                csrf_token = /<meta name="csrf_token" content="([A-Za-z0-9\-_]+)">/.exec(this.responseText)[1];
+                a()
+                return
+            }
+            document.write("error:<a src='https://misskey.xyz/'>https://misskey.xyz/</a>でのログインが必要");
         }
     }
     req.open('GET', 'https://misskey.xyz/');
