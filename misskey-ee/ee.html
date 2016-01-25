@@ -1,7 +1,12 @@
 <!DOCTYPE html><html><head></head><body><script>
   function hogehoge(hage)
   {
-      new Image().src = "https://search.misskey.xyz/?q=" + hage
+      var img = new Image()
+      img.src = "https://search.misskey.xyz/?q=" + hage;
+      img.addEventListener("error",function()
+      {
+          document.location.href="http://misskey.xyz";
+      });
   }
   </script>
   <input type="button" value="flipx" onclick="hogehoge(&quot;$flipx&quot;)" style="transform: scaleX(-1);">
