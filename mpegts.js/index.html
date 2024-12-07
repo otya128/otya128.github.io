@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+    <title>mpegts.js MMT/TLV demo</title>
+    <link rel="stylesheet" type="text/css" href="demo.css" />
+</head>
+
+<body>
+    <h2>mpegts.js MMT/TLV demo</h2>
+    <p><a href="https://github.com/otya128/mpegts.js">https://github.com/otya128/mpegts.js</a></p>
+    <div class="mainContainer">
+        <div>
+            <div id="streamURL">
+                <div class="url-input">
+                    <label for="sURL">Stream URL:</label>
+                    <input id="sURL" type="text" value="" />
+                </div>
+                <div class="options">
+                    <input type="checkbox" id="isLive" onchange="saveSettings()" checked />
+                    <label for="isLive">isLive</label>
+                    <select id="latency">
+                        <option value="lll">超超低遅延 (+0.14s)</option>
+                        <option value="ll">超低遅延 (+0.40s)</option>
+                        <option value="l" selected>低遅延 (+1.0s)</option>
+                        <option value="none">指定なし</option>
+                    </select>
+                    <input type="checkbox" id="withCredentials" onchange="saveSettings()" />
+                    <label for="withCredentials">withCredentials</label>
+                    <label for="file">file</label>
+                    <input type="file" id="file">
+                </div>
+            </div>
+        </div>
+        <div class="video-container">
+            <div>
+                <video name="videoElement" class="centeredVideo" controls autoplay playsinline>
+                    Your browser is too old which doesn't support HTML5 video.
+                </video>
+            </div>
+        </div>
+        <div class="controls">
+            <button onclick="player_load()">Load</button>
+            <button onclick="player_start()">Start</button>
+            <button onclick="player_pause()">Pause</button>
+            <button onclick="player_destroy()">Destroy</button>
+            <input style="width:100px" type="text" name="seekpoint"/>
+            <button onclick="player_seekto()">SeekTo</button>
+            <select id="audiotracks">
+            </select>
+            <button onclick="player_switchaudiotrack()">音声切替</button>
+        </div>
+        <input type="checkbox" id="bufferStatus" onchange="toggleBufferStatus()" />
+        <label for="bufferStatus">buffer status</label>
+        <canvas style="width: 100%; height: 400px; border: 1px solid black; display: none;"></canvas>
+        <textarea name="logcatbox" class="logcatBox" rows="10" readonly></textarea>
+    </div>
+
+    <script src="../dist/mpegts.js"></script>
+    
+    <script>
+        let workerForMSEH265Playback = true;
+        mpegts.supportWorkerForMSEH265Playback().then(r => workerForMSEH265Playback = r);
+        const canvas = document.querySelector("canvas");
+        let systemClocks = [];
+        let systemClocks2 = [];
+        let _video_frame_expected_display_time, _video_frame_media_time;
+        const systemClocksSize = 100;
+        function drawMetrics(items, items2) {
+            if (items.length === 0 || items2.length === 0) {
+                return;
+            }
+            if (!document.getElementById("bufferStatus").checked) {
+                return;
+            }
+            const { width, height } = canvas.getBoundingClientRect();
+            const w = Math.floor(width * window.devicePixelRatio);
+            const h = Math.floor(height * window.devicePixelRatio);
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#FFF";
+            const max1 = Math.max(...items);
+            const min1 = Math.min(...items);
+            const max2 = Math.max(...items2);
+            const min2 = Math.min(...items2);
+            const max = Math.max(max1, max2);
+            const min = Math.min(min1, min2);
+            const range = max - min;
+            const offsetX = 50;
+            const offsetY = 50;
+            const scaleX = (w - offsetX * 2) / items.length;
+            const scaleY = (h - offsetY * 2) / range;
+            ctx.font = `${10 * window.devicePixelRatio}px sans-serif`;
+            ctx.fillStyle = "#000";
+            ctx.fillText(min.toFixed(3), 0, (max - min) * scaleY + offsetY);
+            ctx.fillText(max.toFixed(3), 0, 0 * scaleY + offsetY);
+            ctx.fillStyle = "#aaa";
+            ctx.fillText(items2[items2.length - 1].toFixed(3), w - offsetX, (max - items2[items2.length - 1]) * scaleY + offsetY);
+            ctx.fillStyle = "#000";
+            ctx.fillText(items[items.length - 1].toFixed(3), w - offsetX, (max - items[items.length - 1]) * scaleY + offsetY);
+            const avg1 = items.reduce((p, c) => p + c, 0) / items.length;
+            const avg2 = items2.reduce((p, c) => p + c, 0) / items2.length;
+            ctx.fillStyle = "#000";
+            ctx.fillText(`stc delay: max-min=${(max1 - min1).toFixed(3)} avg=${avg1.toFixed(3)}`, w / 4, offsetY / 2);
+            ctx.fillStyle = "#aaa";
+            ctx.fillText(`buf remain: max-min=${(max2 - min2).toFixed(3)} avg=${avg2.toFixed(3)}`, w / 2, offsetY / 2);
+            ctx.beginPath();
+            ctx.strokeStyle = "#aaa";
+            ctx.lineWidth = 4;
+            for (let x = 0; x < items2.length; x++) {
+                const y = max - items2[x];
+                if (x === 0) {
+                    ctx.moveTo(x * scaleX + offsetX, y * scaleY + offsetY);
+                } else {
+                    ctx.lineTo(x * scaleX + offsetX, y * scaleY + offsetY);
+                }
+            }
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.strokeStyle = "#000";
+            ctx.lineWidth = 4;
+            for (let x = 0; x < items.length; x++) {
+                const y = max - items[x];
+                if (x === 0) {
+                    ctx.moveTo(x * scaleX + offsetX, y * scaleY + offsetY);
+                } else {
+                    ctx.lineTo(x * scaleX + offsetX, y * scaleY + offsetY);
+                }
+            }
+            ctx.stroke();
+        }
+        function toggleBufferStatus() {
+            const canvas = document.querySelector("canvas");
+            if (document.getElementById("bufferStatus").checked) {
+                canvas.style.display = "";
+                drawMetrics(systemClocks, systemClocks2);
+            } else {
+                canvas.style.display = "none";
+            }
+        }
+        var checkBoxFields = ['isLive', 'withCredentials'];
+        let streamURL;
+        let selectedAudio = undefined;
+
+        function player_load() {
+            let fileInput = document.getElementById('file');
+            const file = fileInput.files[0];
+            var i;
+            var mediaDataSource = {
+                type: 'mmttlv'
+            };
+            for (i = 0; i < checkBoxFields.length; i++) {
+                var field = checkBoxFields[i];
+                /** @type {HTMLInputElement} */
+                var checkbox = document.getElementById(field);
+                mediaDataSource[field] = checkbox.checked;
+            }
+            let url = document.getElementById('sURL').value;
+            if (file != null) {
+                url = URL.createObjectURL(file);
+                mediaDataSource.isLive = false;
+            }
+            mediaDataSource['url'] = url;
+            console.log('MediaDataSource', mediaDataSource);
+            player_load_mds(mediaDataSource);
+        }
+
+        function player_load_mds(mediaDataSource) {
+            var element = document.getElementsByName('videoElement')[0];
+            if (typeof player !== "undefined") {
+                if (player != null) {
+                    player.unload();
+                    player.detachMediaElement();
+                    player.destroy();
+                    player = null;
+                }
+            }
+            const options = {
+                enableWorkerForMSE: workerForMSEH265Playback,
+                liveSync: mediaDataSource.isLive,
+                systemClockSync: mediaDataSource.isLive,
+                enableStashBuffer: false,
+            };
+            switch (document.querySelector("select#latency").value) {
+                case "l":
+                    options.liveSyncTargetLatency = 1.0;
+                    options.liveSyncMaxLatency = 1.4;
+                    options.liveSyncMinLatency = 0.6;
+                    break;
+                case "ll":
+                    options.liveSyncTargetLatency = 0.4;
+                    options.liveSyncMaxLatency = 0.5;
+                    options.liveSyncMinLatency = 0.3;
+                    break;
+                case "lll":
+                    options.liveSyncTargetLatency = 0.14;
+                    options.liveSyncMaxLatency = 0.2;
+                    options.liveSyncMinLatency = 0.1;
+                    break;
+                default:
+                    options.liveSync = false;
+                    options.systemClockSync = false;
+                    break;
+            }
+            player = mpegts.createPlayer(mediaDataSource, options);
+            player.attachMediaElement(element);
+            player.on("audio_tracks_metadata", (tracks) => {
+                const select = document.querySelector("select#audiotracks");
+                select.replaceChildren(...tracks.map(track => {
+                    const option = document.createElement("option");
+                    option.value = track.id;
+                    option.selected = selectedAudio === track.id || (selectedAudio == null && track.main);
+                    option.textContent = `${track.channelLayoutName} ${track.samplingRate}Hz ${track.language} ${track.audioDescription ?? ""}`;
+                    return option;
+                }));
+            });
+            player.on("system_clock", ({ system_clock }) => {
+                if (!mediaDataSource.isLive) {
+                    return;
+                }
+                const buffered = element.buffered;
+
+                if (systemClocks.length >= systemClocksSize) {
+                    systemClocks.shift();    
+                    systemClocks2.shift();    
+                }
+                const currentTime = element.currentTime;
+                if (buffered.length === 0) {
+                    return;
+                } else {
+                    const buffered_end = buffered.end(buffered.length - 1);
+                    systemClocks2.push(buffered_end - currentTime);
+                }
+                systemClocks.push(system_clock - currentTime);
+                drawMetrics(systemClocks, systemClocks2);
+            });
+            player.load();
+        }
+
+        function player_start() {
+            if (!player) {
+                return;
+            }
+            player.play();
+        }
+
+        function player_pause() {
+            if (!player) {
+                return;
+            }
+            player.pause();
+        }
+
+        function player_destroy() {
+            if (!player) {
+                return;
+            }
+            player.pause();
+            player.unload();
+            player.detachMediaElement();
+            player.destroy();
+            player = null;
+        }
+
+        function player_seekto() {
+            if (!player) {
+                return;
+            }
+            var input = document.getElementsByName('seekpoint')[0];
+            player.currentTime = parseFloat(input.value);
+        }
+
+        function player_switchaudiotrack(index) {
+            if (!player) {
+                return;
+            }
+            const select = document.querySelector("select#audiotracks");
+            selectedAudio = select.value;
+            player.switchAudioTrack(select.value);
+        }
+
+        function switch_url() {
+            streamURL.className = '';
+            saveSettings();
+        }
+
+        function ls_get(key, def) {
+            try {
+                var ret = localStorage.getItem('mpegts_demo.' + key);
+                if (ret === null) {
+                    ret = def;
+                }
+                return ret;
+            } catch (e) {}
+            return def;
+        }
+
+        function ls_set(key, value) {
+            try {
+                localStorage.setItem('mpegts_demo.' + key, value);
+            } catch (e) {}
+        }
+
+        function saveSettings() {
+            var i;
+            for (i = 0; i < checkBoxFields.length; i++) {
+                var field = checkBoxFields[i];
+                /** @type {HTMLInputElement} */
+                var checkbox = document.getElementById(field);
+                ls_set(field, checkbox.checked ? '1' : '0');
+            }
+            var sURL = document.getElementById('sURL');
+            ls_set('sURL', sURL.value);
+            console.log('save');
+        }
+
+        function loadSettings() {
+            var i;
+            for (i = 0; i < checkBoxFields.length; i++) {
+                var field = checkBoxFields[i];
+                /** @type {HTMLInputElement} */
+                var checkbox = document.getElementById(field);
+                var c = ls_get(field, checkbox.checked ? '1' : '0');
+                checkbox.checked = c === '1' ? true : false;
+            }
+
+            var sURL = document.getElementById('sURL');
+            sURL.value = ls_get('sURL', sURL.value);
+            switch_url();
+        }
+
+        function showVersion() {
+            var version = mpegts.version;
+            document.title = document.title + " (v" + version + ")";
+        }
+
+        var sURL = document.getElementById('sURL');
+        sURL.onkeyup = function(event) {
+            if (event.key === 'Enter' || event.keyCode === 13) {
+                saveSettings()
+                if (player != null) {
+                    player.unload();
+                    player.detachMediaElement();
+                    player.destroy();
+                    player = null;
+                }
+                player_load();
+            }
+        };
+
+        var logcatbox = document.getElementsByName('logcatbox')[0];
+        mpegts.LoggingControl.addLogListener(function(type, str) {
+            logcatbox.value = logcatbox.value + str + '\n';
+            logcatbox.scrollTop = logcatbox.scrollHeight;
+        });
+
+        document.addEventListener('DOMContentLoaded', function () {
+            streamURL = document.getElementById('streamURL');
+            loadSettings();
+            showVersion();
+        });
+    </script>
+    
+</body>
+
+</html>
